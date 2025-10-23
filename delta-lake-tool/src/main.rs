@@ -1,20 +1,46 @@
 use deltalake::protocol::SaveMode;
+use deltalake::writer::{DeltaWriter, JsonWriter};
 use deltalake::{DataType, DeltaOps, PrimitiveType};
 use std::env;
+use std::fs::File;
+use std::io::Read;
 use url::Url;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    create_table().await?;
-    Ok(())
-}
-
-async fn create_table() -> Result<(), Box<dyn std::error::Error>> {
     let mut dir = env::current_dir()?;
     dir.push("data");
     dir.push("http_requests");
+    let url = Url::parse(format!("file://{}", dir.display()).as_str())?;
 
-    let table = DeltaOps::try_from_uri(Url::parse(format!("file://{}", dir.display()).as_str())?)
+    //create_table(url.clone()).await?;
+    write_data(url.clone()).await?;
+
+    Ok(())
+}
+
+async fn write_data(url: Url) -> Result<(), Box<dyn std::error::Error>> {
+    let mut table = deltalake::open_table(url).await?;
+    let mut writer = JsonWriter::for_table(&table)?;
+
+    let mut buffer = String::new();
+    let _ = File::open("./import.json")?.read_to_string(&mut buffer)?;
+
+    writer
+        .write(
+            buffer
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect(),
+        )
+        .await?;
+    writer.flush_and_commit(&mut table).await?;
+
+    Ok(())
+}
+
+async fn create_table(url: Url) -> Result<(), Box<dyn std::error::Error>> {
+    let table = DeltaOps::try_from_uri(url)
         .await?
         .create()
         .with_table_name("http")
